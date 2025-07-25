@@ -191,6 +191,10 @@ function summarizeData(gfrs, uacrs, dateObjs, creats) {
 }
 
 function plotCharts(dates, gfrs, uacrs, creats) {
+  dates.reverse();
+  gfrs.reverse();
+  uacrs.reverse();
+  creats.reverse();
   const gctx = document.getElementById("gfrChart").getContext("2d");
   const uctx = document.getElementById("uacrChart").getContext("2d");
   const cctx = document.getElementById("creatinineChart").getContext("2d");
@@ -213,7 +217,7 @@ function plotCharts(dates, gfrs, uacrs, creats) {
       label: "GFR", data: gfrs, borderColor: "blue", backgroundColor: gfrColors, tension: 0.3, spanGaps: true }]},
     options: {
       scales: {
-        x: { reverse: true },
+        x: { reverse: true, ticks: { font: { size: 14 } } },
         y: { beginAtZero: false, title: { display: true, text: 'GFR' }}
       }
     }
@@ -225,7 +229,7 @@ function plotCharts(dates, gfrs, uacrs, creats) {
       label: "UACR", data: uacrs, borderColor: "#000", backgroundColor: "transparent", tension: 0.3, spanGaps: true }]},
     options: {
       scales: {
-        x: { reverse: true },
+        x: { reverse: true, ticks: { font: { size: 14 } } },
         y: { beginAtZero: true, title: { display: true, text: 'UACR' }}
       }
     }
@@ -237,7 +241,7 @@ function plotCharts(dates, gfrs, uacrs, creats) {
       label: "Creatinine", data: creats, borderColor: "#000", backgroundColor: "transparent", tension: 0.3, spanGaps: true }]},
     options: {
       scales: {
-        x: { reverse: true },
+        x: { reverse: true, ticks: { font: { size: 14 } } },
         y: { beginAtZero: false, title: { display: true, text: 'Creatinine (mg/dL)' }}
       }
     }
