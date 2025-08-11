@@ -1,0 +1,361 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Kidney Care Plan</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+  <style>
+    body { font-family: Arial, sans-serif; background:#f7fbfd; margin:20px; }
+    h1 { text-align:center; color:#2c3e50; }
+    input, select, textarea, button { width:100%; padding:8px; margin:6px 0; font-size:14px; }
+    label { font-weight:bold; display:block; margin-top:10px; }
+    .chart-container { width:100%; margin-top:20px; background:#fff; border-radius:8px; }
+    canvas { background:#fff; border-radius:8px; height:200px !important; }
+    .inline { display:flex; flex-wrap:wrap; gap:10px; }
+    .inline label { flex:1 0 240px; }
+    #heatmapTable { border-collapse: collapse; margin-top: 20px; width: 100%; }
+    #heatmapTable td, #heatmapTable th { padding:6px; text-align:center; border:1px solid #aaa; font-weight:bold; }
+    .green{background-color:#b6ffb6;} .yellow{background-color:#fff79a;}
+    .orange{background-color:#ffc78a;} .red{background-color:#ff7b7b;}
+    #exportBtn { background:#3498db; color:#fff; font-size:16px; margin-top:20px; }
+  </style>
+</head>
+<body>
+  <img src="nspc-logo.png?v=20250811" alt="NSPC Logo" style="width:180px; display:block; margin:10px auto 0;" />
+  <h1>Kidney Care Plan</h1>
+
+  <label>Patient Name</label>
+  <input type="text" id="name" placeholder="Enter full name" />
+  <label>Date</label>
+  <input type="date" id="date" />
+
+  <label>Paste Lab Notes or Text</label>
+  <textarea id="labInput" rows="6" placeholder="e.g. 06/01/2024 - creatinine 1.2, GFR 57, UACR 120..."></textarea>
+  <button onclick="parseAndPlot()">Parse and Plot Charts</button>
+
+  <div id="parsedSummary" style="font-weight:bold; margin:10px 0;"></div>
+  <div class="chart-container"><canvas id="gfrChart"></canvas></div>
+  <div class="chart-container"><canvas id="creatinineChart"></canvas></div>
+  <div class="chart-container"><canvas id="uacrChart"></canvas></div>
+
+  <!-- preload CKD chart to ensure PDF embedding -->
+  <img id="ckdChartImg" src="IMG_9350.jpeg" alt="CKD Classification Chart" style="display:none" />
+
+  <h3>KDIGO Risk Heat Map (Patient Cell Arrow)</h3>
+  <table id="heatmapTable">
+    <tr><th>UACR ↓ / GFR →</th><th>≥ 90</th><th>60–89</th><th>45–59</th><th>30–44</th><th>15–29</th><th>&lt;15</th></tr>
+    <tr><th>&lt; 30 (A1)</th><td class="green">G1A1</td><td class="green">G2A1</td><td class="yellow">G3aA1</td><td class="yellow">G3bA1</td><td class="orange">G4A1</td><td class="red">G5A1</td></tr>
+    <tr><th>30–300 (A2)</th><td class="yellow">G1A2</td><td class="yellow">G2A2</td><td class="orange">G3aA2</td><td class="orange">G3bA2</td><td class="red">G4A2</td><td class="red">G5A2</td></tr>
+    <tr><th>&gt; 300 (A3)</th><td class="orange">G1A3</td><td class="orange">G2A3</td><td class="red">G3aA3</td><td class="red">G3bA3</td><td class="red">G4A3</td><td class="red">G5A3</td></tr>
+  </table>
+
+  <h3>Follow-up Plan</h3>
+  <p>Continue kidney protective medications</p>
+  <div class="inline">
+    <label>Follow-up Visit In:
+      <select id="visitFollowup">
+        <option value="1 month">1 month</option>
+        <option value="2 months">2 months</option>
+        <option value="3 months">3 months</option>
+        <option value="6 months">6 months</option>
+      </select>
+    </label>
+    <label>Repeat labs in:
+      <select id="repeatLabs">
+        <option value="1 month">1 month</option>
+        <option value="2 months">2 months</option>
+        <option value="3 months">3 months</option>
+        <option value="6 months">6 months</option>
+      </select>
+    </label>
+    <label>Vitamin D (supplementation):
+      <select id="vitaminDSupp">
+        <option>Hold</option>
+        <option>2000 IU daily</option>
+        <option>5000 IU daily</option>
+        <option>Stop</option>
+      </select>
+    </label>
+    <label>BP Goal:
+      <select id="bpGoal">
+        <option>&lt;120/80</option>
+        <option>&lt;130/80</option>
+        <option>&lt;140/80</option>
+      </select>
+    </label>
+    <label>Salt Restriction:
+      <select id="saltRestriction">
+        <option value="2 gm or less">2 gm or less</option>
+        <option value="Liberalized">Liberalized</option>
+      </select>
+    </label>
+    <label>Fluid Restriction:
+      <select id="fluidRestriction">
+        <option value="42 oz">42 oz</option>
+        <option value="60 oz">60 oz</option>
+        <option value="No limit">No limit</option>
+      </select>
+    </label>
+    <label>Potassium Restriction:
+      <select id="kRestriction">
+        <option value="< 3 gm">&lt; 3 gm</option>
+        <option value="No limit">No limit</option>
+      </select>
+    </label>
+  </div>
+
+  <button id="exportBtn" onclick="exportToPDF()">Export to PDF</button>
+
+<script>
+/* CKD stage background bands plugin — apply to GFR chart only */
+const backgroundBands = {
+  id: 'ckdBands',
+  beforeDatasetsDraw(chart, args, pluginOptions) {
+    if (!chart.canvas || chart.canvas.id !== 'gfrChart') return;
+    const ctx = chart.ctx;
+    const yAxis = chart.scales.y;
+    const area = chart.chartArea;
+    const zones = [
+      { min: 0,  max: 15, color: '#cc0000' },  // Stage 5
+      { min: 15, max: 30, color: '#ff6666' },  // Stage 4
+      { min: 30, max: 45, color: '#ffc78a' },  // Stage 3b
+      { min: 45, max: 60, color: '#fff79a' }   // Stage 3a
+    ];
+    ctx.save();
+    zones.forEach(z => {
+      const yTop = yAxis.getPixelForValue(z.max);
+      const yBottom = yAxis.getPixelForValue(z.min);
+      const height = yBottom - yTop;
+      if (!isNaN(yTop) && !isNaN(height)) {
+        ctx.fillStyle = z.color;
+        ctx.fillRect(area.left, yTop, area.right - area.left, height);
+      }
+    });
+    ctx.restore();
+  }
+};
+Chart.register(backgroundBands);
+</script>
+
+<script>
+let gfrChart, uacrChart, creatinineChart;
+
+function parseAndPlot() {
+  const input = document.getElementById("labInput").value;
+  const lines = input.split(/\n|;/);
+  const dates = [], gfrs = [], uacrs = [], creats = [], dateObjs = [];
+
+  lines.forEach(line => {
+    const dateMatch = line.match(/(\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4})/);
+    const gfrMatch = line.match(/\b(?:e?GFR)[:=\-]?\s*(\d{1,3})/i);
+    const uacrMatch = line.match(/UACR[:=\-]?\s*(\d{1,5})/i);
+    const creatMatch = line.match(/creatinine[:=\-]?\s*(\d{1,2}\.\d+)/i);
+    if (dateMatch) {
+      const dateStr = dateMatch[1];
+      const parsedDate = new Date(dateStr);
+      if (!isNaN(parsedDate)) {
+        dateObjs.push(parsedDate);
+        dates.push(dateStr);
+        gfrs.push(gfrMatch ? parseInt(gfrMatch[1]) : null);
+        uacrs.push(uacrMatch ? parseInt(uacrMatch[1]) : null);
+        creats.push(creatMatch ? parseFloat(creatMatch[1]) : null);
+      }
+    }
+  });
+
+  const summary = summarizeData(gfrs, uacrs, dateObjs, creats);
+  document.getElementById("parsedSummary").innerText = summary;
+  highlightKDIGO(gfrs, uacrs);
+  plotCharts(dates.reverse(), gfrs.reverse(), uacrs.reverse(), creats.reverse());
+}
+
+function summarizeData(gfrs, uacrs, dateObjs, creats) {
+  let s = "";
+  const latestGFR = gfrs.filter(v => v !== null).slice(-1)[0];
+  const latestUACR = uacrs.filter(v => v !== null).slice(-1)[0];
+  if (latestGFR !== undefined) {
+    s += "CKD Stage: " + (latestGFR >= 90 ? "1" : latestGFR >= 60 ? "2" : latestGFR >= 45 ? "3a" : latestGFR >= 30 ? "3b" : latestGFR >= 15 ? "4" : "5");
+  }
+  if (latestUACR !== undefined) {
+    s += ` | Albuminuria: ${latestUACR < 30 ? "A1" : latestUACR <= 300 ? "A2" : "A3"}`;
+  }
+  // Baseline creatinine (6 mo)
+  const now = new Date();
+  const sixMonthsAgo = new Date(now.getFullYear(), now.getMonth()-6, now.getDate());
+  const recentCr = creats.map((val,i)=>({val,d:dateObjs[i]})).filter(e=>e.val && e.d && e.d >= sixMonthsAgo).map(e=>e.val);
+  if (recentCr.length >= 1) {
+    const avgCr = (recentCr.reduce((a,b)=>a+b)/recentCr.length).toFixed(2);
+    s += ` | Baseline Creatinine (6 mo): ${avgCr}`;
+  }
+  return s;
+}
+
+function makeTightRange(values, pad=3, minSpan=12) {
+  const cleaned = values.filter(v => v!=null);
+  if (!cleaned.length) return {min: undefined, max: undefined};
+  let lo = Math.min(...cleaned);
+  let hi = Math.max(...cleaned);
+  lo = Math.max(0, Math.floor(lo - pad));
+  hi = Math.ceil(hi + pad);
+  if (hi - lo < minSpan) hi = lo + minSpan;
+  return { min: lo, max: hi };
+}
+
+function plotCharts(dates, gfrs, uacrs, creats) {
+  // keep labels chronological left->right with latest at right
+  const gctx = document.getElementById("gfrChart").getContext("2d");
+  const uctx = document.getElementById("uacrChart").getContext("2d");
+  const cctx = document.getElementById("creatinineChart").getContext("2d");
+
+  if (gfrChart) gfrChart.destroy();
+  if (uacrChart) uacrChart.destroy();
+  if (creatinineChart) creatinineChart.destroy();
+
+  const range = makeTightRange(gfrs, 3, 12); // tighter axis for GFR
+
+  gfrChart = new Chart(gctx, {
+    type: "line",
+    data: { labels: dates, datasets: [{
+      label: "GFR", data: gfrs, borderColor: "#1f77b4", backgroundColor: "rgba(31,119,180,0.10)",
+      pointBackgroundColor: "#1f77b4", pointBorderColor: "#1f77b4", tension: 0.3, spanGaps: true }]},
+    options: {
+      plugins: { legend: { labels: { color: '#333' } } },
+      scales: {
+        x: { ticks: { font: { size: 12 }, color: '#666' }, grid: { color:'#eee' } },
+        y: { min: range.min, max: range.max, title: { display:true, text:'GFR' }, ticks:{ color:'#666' }, grid:{ color:'#eee' } }
+      }
+    }
+  });
+
+  // Grayscale charts for Creatinine and UACR
+  creatinineChart = new Chart(cctx, {
+    type: "line",
+    data: { labels: dates, datasets: [{
+      label: "Creatinine", data: creats, borderColor: "#000000", backgroundColor: "rgba(0,0,0,0.10)",
+      pointBackgroundColor:"#000000", pointBorderColor:"#000000", tension:0.3, spanGaps:true }]},
+    options: { scales: {
+      x: { ticks:{ font:{size:12}, color:'#666' }, grid:{ color:'#eee' } },
+      y: { beginAtZero:false, title:{ display:true, text:'Creatinine (mg/dL)' }, ticks:{ color:'#666' }, grid:{ color:'#eee' } }
+    }}
+  });
+
+  uacrChart = new Chart(uctx, {
+    type: "line",
+    data: { labels: dates, datasets: [{
+      label: "UACR", data: uacrs, borderColor: "#222222", backgroundColor: "rgba(0,0,0,0.10)",
+      pointBackgroundColor:"#222222", pointBorderColor:"#222222", tension:0.3, spanGaps:true }]},
+    options: { scales: {
+      x: { ticks:{ font:{size:12}, color:'#666' }, grid:{ color:'#eee' } },
+      y: { beginAtZero:true, title:{ display:true, text:'UACR' }, ticks:{ color:'#666' }, grid:{ color:'#eee' } }
+    }}
+  });
+}
+
+async function loadImageAsDataURL(src) {
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.onload = () => {
+      try {
+        const c = document.createElement('canvas');
+        c.width = img.naturalWidth; c.height = img.naturalHeight;
+        const ctx = c.getContext('2d');
+        ctx.drawImage(img, 0, 0);
+        const data = c.toDataURL('image/png');
+        resolve({ data, fmt: 'PNG' });
+      } catch(e) {
+        try {
+          const data = c.toDataURL('image/jpeg');
+          resolve({ data, fmt: 'JPEG' });
+        } catch(e2) { resolve(null); }
+      }
+    };
+    img.onerror = () => resolve(null);
+    img.src = src + (src.includes('?') ? '&' : '?') + 'v=' + Date.now();
+  });
+}
+
+async function exportToPDF() {
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF({ orientation:'portrait', unit:'mm', format:'a4' });
+  const pageWidth = doc.internal.pageSize.getWidth();
+
+  const name = document.getElementById("name").value || "";
+  const date = document.getElementById("date").value || "";
+  const followupVisit = document.getElementById("visitFollowup").value;
+  const followup = document.getElementById("repeatLabs").value;
+  const vitDSupp = document.getElementById("vitaminDSupp").value;
+  const bpGoal = document.getElementById("bpGoal").value;
+  const salt = document.getElementById("saltRestriction").value;
+  const fluid = document.getElementById("fluidRestriction").value;
+  const k = document.getElementById("kRestriction").value;
+  const summary = document.getElementById("parsedSummary").innerText || "";
+
+  // Logo
+  try {
+    const logo = await loadImageAsDataURL('nspc-logo.png');
+    if (logo) {
+      const logoW = 50, logoH = 20;
+      const x = (pageWidth - logoW) / 2;
+      doc.addImage(logo.data, logo.fmt, x, 8, logoW, logoH);
+    }
+  } catch(e) {}
+
+  // Title
+  doc.setFontSize(16);
+  doc.text('Kidney Care Plan', pageWidth/2, 34, { align: 'center' });
+
+  // Info block
+  doc.setFontSize(10);
+  let y = 42;
+  const lineGap = 5.2;
+  [
+    `Patient: ${name}`,
+    `Date: ${date}`,
+    `Summary: ${summary}`,
+    `Follow-up Visit In: ${followupVisit}    Repeat Labs: ${followup}`,
+    `Vitamin D: ${vitDSupp}    BP Goal: ${bpGoal}    Salt: ${salt}    Fluid: ${fluid}    Potassium: ${k}`
+  ].forEach(t => { doc.text(t, 10, y); y += lineGap; });
+
+  // Graphs (scaled)
+  const gfrCanvas = document.getElementById("gfrChart");
+  const creatCanvas = document.getElementById("creatinineChart");
+  const uacrCanvas = document.getElementById("uacrChart");
+
+  const imgW = 175, imgH = 28;
+  doc.addImage(gfrCanvas.toDataURL("image/png"), "PNG", 10, 72, imgW, imgH);
+  doc.addImage(creatCanvas.toDataURL("image/png"), "PNG", 10, 102, imgW, imgH);
+  doc.addImage(uacrCanvas.toDataURL("image/png"), "PNG", 10, 132, imgW, imgH);
+
+  // CKD chart
+  try {
+    const ckd = await loadImageAsDataURL('IMG_9350.jpeg');
+    if (ckd) doc.addImage(ckd.data, ckd.fmt, 10, 164, 175, 42);
+  } catch(e) {}
+
+  doc.save('kidney_care_plan.pdf');
+}
+
+function highlightKDIGO(gfrs, uacrs) {
+  const kdigoTable = document.getElementById("heatmapTable");
+  let gfr = gfrs.filter(v => v !== null).pop();
+  let uacr = uacrs.filter(v => v !== null).pop();
+  if (gfr == null || uacr == null) return;
+
+  let gStage = gfr >= 90 ? 1 : gfr >= 60 ? 2 : gfr >= 45 ? 3 : gfr >= 30 ? 4 : gfr >= 15 ? 5 : 6;
+  let aStage = uacr < 30 ? 1 : uacr <= 300 ? 2 : 3;
+  const cellMap = {
+    "1_1": [1,1], "2_1": [1,2], "3_1": [1,3], "4_1": [1,4], "5_1": [1,5], "6_1": [1,6],
+    "1_2": [2,1], "2_2": [2,2], "3_2": [2,3], "4_2": [2,4], "5_2": [2,5], "6_2": [2,6],
+    "1_3": [3,1], "2_3": [3,2], "3_3": [3,3], "4_3": [3,4], "5_3": [3,5], "6_3": [3,6]
+  };
+  const key = `${gStage}_${aStage}`;
+  if (cellMap[key]) {
+    const [row,col] = cellMap[key];
+    kdigoTable.rows[row].cells[col].innerHTML += " ←";
+  }
+}
+</script>
+</body>
+</html>
